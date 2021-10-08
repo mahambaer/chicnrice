@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "7728267727",
+    "firebase_url": "https://chic-n-box-default-rtdb.firebaseio.com",
+    "project_id": "chic-n-box",
+    "storage_bucket": "chic-n-box.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:7728267727:android:8d09772ca115f7ad0192ba",
+        "android_client_info": {
+          "package_name": "com.chicnrice"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "7728267727-qe54mera96n5jet5h7hfv1iau666t8dl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCzj7-X2uXb0P_QzBBFaxrzeW-EUr892jY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "7728267727-qe54mera96n5jet5h7hfv1iau666t8dl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
