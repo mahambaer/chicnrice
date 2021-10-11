@@ -24,6 +24,7 @@ import { TextInput, Button, Title } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Appbar } from 'react-native-paper';
 
+//Test
 function LoginScreen(props) {
   const [email, setEmail] = useState();
   const [password, setPassword] = useState();
