@@ -13,6 +13,9 @@ import {
   StyleSheet,
   Text,
   View,
+  Image,
+  TouchableOpacity,
+  FlatList
 } from 'react-native';
 
 import { NavigationContainer } from '@react-navigation/native';
@@ -22,7 +25,7 @@ import auth from '@react-native-firebase/auth';
 import database from '@react-native-firebase/database';
 import { TextInput, Button, Title } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { Appbar } from 'react-native-paper';
+import { Appbar, FAB, Switch } from 'react-native-paper';
 
 //Test
 function LoginScreen(props) {
@@ -114,8 +117,11 @@ function CustomNavigationBar(props) {
 
   return (
     <Appbar.Header>
-      <Appbar.Content title="" subtitle={''} />
-      <Appbar.Action icon="logout" onPress={handleLogout} />
+      {props.route.name != "Home" &&
+        <Appbar.BackAction onPress={() => props.navigation.goBack()} />}
+      <Appbar.Content title={props.route.name} subtitle={''} />
+      {props.route.name == "Home" &&
+        <Appbar.Action icon="logout" onPress={handleLogout} />}
     </Appbar.Header>
   );
 }
@@ -152,9 +158,382 @@ function PemilikScreen() {
 }
 
 function MenuScreen(props) {
+
+  function handleMakanan() {
+    props.navigation.navigate("List Makanan")
+  }
+
+  function handleMinuman() {
+    props.navigation.navigate("List Minuman")
+  }
+
   return (
     <SafeAreaView style={styles.containerHome}>
-      <Text>Menu Screen</Text>
+      <TouchableOpacity style={[styles.touchImage, styles.elevation]} onPress={handleMakanan}>
+        <Image
+          resizeMode="contain"
+          style={styles.image}
+          source={require('./assets/images/food.png')}
+        />
+        <Text style={{ textAlign: "center", fontWeight: "bold", fontSize: 32 }}>Makanan</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.touchImage, styles.elevation]} onPress={handleMinuman}>
+        <Image
+          resizeMode="contain"
+          style={styles.image}
+          source={require('./assets/images/drink.png')}
+        />
+        <Text style={{ textAlign: "center", fontWeight: "bold", fontSize: 32 }}>Minuman</Text>
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
+const Item = ({ name, backgroundColor, textColor, onPress }) => (
+  <TouchableOpacity onPress={onPress} style={[styles.item, styles.elevation, backgroundColor]}>
+    <Text style={[styles.titleItem, textColor]}>{name}</Text>
+  </TouchableOpacity>
+);
+
+function MakananListScreen(props) {
+  const [list, setList] = useState([]);
+  const mountedRef = useRef(true);
+  function handleTambah() {
+    props.navigation.navigate("Tambah Makanan")
+  }
+
+  const renderItem = ({ item }) => {
+    const backgroundColor = item.available ? "#f9c2ff" : "#6e3b6e";
+    const color = item.available ? "black" : "white";
+    return (
+      <Item name={item.name} backgroundColor={{backgroundColor}} textColor={{color}} onPress={() => props.navigation.navigate("Edit Makanan", {
+      itemId: item.id
+    })}/>
+  )};
+
+  useEffect(() => {
+    const subscribe = database()
+      .ref('/foods')
+      .on('value', snapshot => {
+        const data = snapshot.val();
+        let datas = [];
+        if (data != null) {
+          for (const [key, item] of Object.entries(data)) {
+            const newData = {
+              available: item.available,
+              discount: item.discount,
+              name: item.name,
+              price: item.price,
+              id: key
+            }
+            datas = [...datas, newData]
+          }
+        }
+        setList(datas)
+      });
+
+    return () => {
+      mountedRef.current = false
+      subscribe
+    }
+  }, [])
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <FlatList
+        data={list}
+        renderItem={renderItem}
+        keyExtractor={item => item.id}
+      />
+      <FAB
+        style={styles.fab}
+        small
+        icon="plus"
+        onPress={handleTambah}
+      />
+    </SafeAreaView>
+  );
+}
+
+function MakananAddScreen(props) {
+  const [name, setName] = useState();
+  const [price, setPrice] = useState();
+
+  function handleTambah() {
+    if (name != null && price != null) {
+      const newReference = database().ref('/foods').push();
+      newReference
+        .set({
+          name: name,
+          price: Number(price),
+          discount: 0,
+          available: true
+        })
+        .then(() => props.navigation.navigate('List Makanan'));
+    }
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <TextInput
+        label="Nama Makanan"
+        value={name}
+        onChangeText={text => setName(text)}
+        style={styles.input}
+        autoCapitalize="words"
+      />
+      <TextInput
+        label="Harga Makanan"
+        value={price}
+        onChangeText={text => setPrice(text)}
+        style={styles.input}
+        keyboardType="numeric"
+      />
+      <Button style={styles.input} mode="contained" onPress={handleTambah}>
+        Save
+      </Button>
+    </SafeAreaView>
+  );
+}
+
+function MakananEditScreen(props) {
+  const { itemId } = props.route.params;
+  const [name, setName] = useState();
+  const [price, setPrice] = useState();
+  const [discount, setDiscount] = useState();
+  const [isAvailable, setIsAvailable] = useState(false);
+  const mountedRef = useRef(true);
+
+  function handleTambah() {
+    if (name != null && price != null && discount != null) {
+      database().ref('/foods/' + itemId).update({
+        name: name,
+        price: Number(price),
+        discount: Number(discount),
+        available: isAvailable
+      })
+      .then(() => props.navigation.navigate('List Makanan'));
+    }
+  }
+
+  const onToggleSwitch = () => setIsAvailable(!isAvailable);
+
+  useEffect(() => {
+    const subscribe = database().ref("/foods/" + itemId).once("value").then((snapshot) => {
+      setName(snapshot.val().name);
+      setPrice(snapshot.val().price.toString());
+      setDiscount(snapshot.val().discount.toString());
+      setIsAvailable(snapshot.val().available);
+    });
+
+    return () => {
+      mountedRef.current = false
+      subscribe
+    }
+  }, [])
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <TextInput
+        label="Nama Makanan"
+        value={name}
+        onChangeText={text => setName(text)}
+        style={styles.input}
+        autoCapitalize="words"
+      />
+      <TextInput
+        label="Harga Makanan"
+        value={price}
+        onChangeText={text => setPrice(text)}
+        style={styles.input}
+        keyboardType="numeric"
+      />
+      <TextInput
+        label="Diskon"
+        value={discount}
+        onChangeText={text => setDiscount(text)}
+        style={styles.input}
+        keyboardType="numeric"
+        right={<TextInput.Affix text="%" />}
+      />
+      <View style={styles.switchContainer}>
+        <View style={styles.switchBox}><Text style={{fontWeight: "bold"}}>Available</Text></View>
+        <Switch style={styles.switchBox} value={isAvailable} onValueChange={onToggleSwitch} />
+      </View>
+      <Button style={styles.input} mode="contained" onPress={handleTambah}>
+        Save
+      </Button>
+    </SafeAreaView>
+  );
+}
+
+function MinumanListScreen(props) {
+  const [list, setList] = useState([]);
+  const mountedRef = useRef(true);
+  function handleTambah() {
+    props.navigation.navigate("Tambah Minuman")
+  }
+
+  const renderItem = ({ item }) => {
+    const backgroundColor = item.available ? "#f9c2ff" : "#6e3b6e";
+    const color = item.available ? "black" : "white";
+    return (
+      <Item name={item.name} backgroundColor={{backgroundColor}} textColor={{color}} onPress={() => props.navigation.navigate("Edit Minuman", {
+      itemId: item.id
+    })}/>
+  )};
+
+  useEffect(() => {
+    const subscribe = database()
+      .ref('/drinks')
+      .on('value', snapshot => {
+        const data = snapshot.val();
+        let datas = [];
+        if (data != null) {
+          for (const [key, item] of Object.entries(data)) {
+            const newData = {
+              available: item.available,
+              discount: item.discount,
+              name: item.name,
+              price: item.price,
+              id: key
+            }
+            datas = [...datas, newData]
+          }
+        }
+        setList(datas)
+      });
+
+    return () => {
+      mountedRef.current = false
+      subscribe
+    }
+  }, [])
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <FlatList
+        data={list}
+        renderItem={renderItem}
+        keyExtractor={item => item.id}
+      />
+      <FAB
+        style={styles.fab}
+        small
+        icon="plus"
+        onPress={handleTambah}
+      />
+    </SafeAreaView>
+  );
+}
+
+function MinumanAddScreen(props) {
+  const [name, setName] = useState();
+  const [price, setPrice] = useState();
+
+  function handleTambah() {
+    if (name != null && price != null) {
+      const newReference = database().ref('/drinks').push();
+      newReference
+        .set({
+          name: name,
+          price: Number(price),
+          discount: 0,
+          available: true
+        })
+        .then(() => props.navigation.navigate('List Minuman'));
+    }
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <TextInput
+        label="Nama Minuman"
+        value={name}
+        onChangeText={text => setName(text)}
+        style={styles.input}
+        autoCapitalize="words"
+      />
+      <TextInput
+        label="Harga Minuman"
+        value={price}
+        onChangeText={text => setPrice(text)}
+        style={styles.input}
+        keyboardType="numeric"
+      />
+      <Button style={styles.input} mode="contained" onPress={handleTambah}>
+        Save
+      </Button>
+    </SafeAreaView>
+  );
+}
+
+function MinumanEditScreen(props) {
+  const { itemId } = props.route.params;
+  const [name, setName] = useState();
+  const [price, setPrice] = useState();
+  const [discount, setDiscount] = useState();
+  const [isAvailable, setIsAvailable] = useState(false);
+  const mountedRef = useRef(true);
+
+  function handleTambah() {
+    if (name != null && price != null && discount != null) {
+      database().ref('/drinks/' + itemId).update({
+        name: name,
+        price: Number(price),
+        discount: Number(discount),
+        available: isAvailable
+      })
+      .then(() => props.navigation.navigate('List Minuman'));
+    }
+  }
+
+  const onToggleSwitch = () => setIsAvailable(!isAvailable);
+
+  useEffect(() => {
+    const subscribe = database().ref("/drinks/" + itemId).once("value").then((snapshot) => {
+      setName(snapshot.val().name);
+      setPrice(snapshot.val().price.toString());
+      setDiscount(snapshot.val().discount.toString());
+      setIsAvailable(snapshot.val().available);
+    });
+
+    return () => {
+      mountedRef.current = false
+      subscribe
+    }
+  }, [])
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <TextInput
+        label="Nama Minuman"
+        value={name}
+        onChangeText={text => setName(text)}
+        style={styles.input}
+        autoCapitalize="words"
+      />
+      <TextInput
+        label="Harga Minuman"
+        value={price}
+        onChangeText={text => setPrice(text)}
+        style={styles.input}
+        keyboardType="numeric"
+      />
+      <TextInput
+        label="Diskon"
+        value={discount}
+        onChangeText={text => setDiscount(text)}
+        style={styles.input}
+        keyboardType="numeric"
+        right={<TextInput.Affix text="%" />}
+      />
+      <View style={styles.switchContainer}>
+        <View style={styles.switchBox}><Text style={{fontWeight: "bold"}}>Available</Text></View>
+        <Switch style={styles.switchBox} value={isAvailable} onValueChange={onToggleSwitch} />
+      </View>
+      <Button style={styles.input} mode="contained" onPress={handleTambah}>
+        Save
+      </Button>
     </SafeAreaView>
   );
 }
@@ -199,7 +578,7 @@ const App = () => {
     <NavigationContainer>
       <Stack.Navigator initialRouteName={first}
         screenOptions={{
-          header: (props) => <CustomNavigationBar {...props} user={user} setIsLogin={setIsLogin}/>,
+          header: (props) => <CustomNavigationBar {...props} user={user} setIsLogin={setIsLogin} />,
         }}>
         {!isLogin ?
           <Stack.Group>
@@ -212,14 +591,38 @@ const App = () => {
             <Stack.Screen name="Home">
               {props => {
                 if (role == "Pemilik") {
-                  return <PemilikScreen {...props}/>
+                  return <PemilikScreen {...props} />
                 } else if (role == "Pegawai") {
-                  return <HomeScreen {...props}/>
+                  return <HomeScreen {...props} />
                 } else {
                   return null;
                 }
               }}
             </Stack.Screen>
+            {role == "Pemilik" &&
+              <Stack.Screen name="Tambah Makanan">
+                {props => <MakananAddScreen {...props} />}
+              </Stack.Screen>}
+            {role == "Pemilik" &&
+              <Stack.Screen name="Edit Makanan">
+                {props => <MakananEditScreen {...props} />}
+              </Stack.Screen>}
+            {role == "Pemilik" &&
+              <Stack.Screen name="List Makanan">
+                {props => <MakananListScreen {...props} />}
+              </Stack.Screen>}
+            {role == "Pemilik" &&
+              <Stack.Screen name="Tambah Minuman">
+                {props => <MinumanAddScreen {...props} />}
+              </Stack.Screen>}
+            {role == "Pemilik" &&
+              <Stack.Screen name="Edit Minuman">
+                {props => <MinumanEditScreen {...props} />}
+              </Stack.Screen>}
+            {role == "Pemilik" &&
+              <Stack.Screen name="List Minuman">
+                {props => <MinumanListScreen {...props} />}
+              </Stack.Screen>}
           </Stack.Group>
         }
       </Stack.Navigator>
@@ -262,6 +665,59 @@ const styles = StyleSheet.create({
     paddingTop: 32,
     fontSize: 40,
     fontWeight: "bold"
+  },
+  image: {
+    height: 200
+  },
+  touchImage: {
+    backgroundColor: "white",
+    width: "90%",
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: 12,
+    borderWidth: 1,
+    borderColor: "white",
+    borderRadius: 50
+  },
+  fab: {
+    position: 'absolute',
+    margin: 16,
+    right: 0,
+    bottom: 0,
+  },
+  item: {
+    backgroundColor: '#f9c2ff',
+    padding: 20,
+    marginVertical: 8,
+    marginHorizontal: 8
+  },
+  shadowProp: {
+    shadowColor: '#171717',
+    shadowOffset: {width: -2, height: 4},
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  elevation: {
+    elevation: 8,
+    shadowColor: '#52006A',
+  },
+  titleItem: {
+    fontSize: 28,
+  },
+  switchContainer: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    padding: 12,
+    height: "auto"
+  },
+  switchBox: {
+    flex: 1,
+    margin: 2,
+    height: 32,
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "nowrap",
   }
 });
 
