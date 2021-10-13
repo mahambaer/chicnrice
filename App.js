@@ -9,7 +9,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -18,19 +17,26 @@ import {
   FlatList,
   BackHandler,
   Alert,
-  SectionList
+  SectionList,
+  LogBox 
 } from 'react-native';
+
+import {
+  BLEPrinter,
+} from "react-native-thermal-receipt-printer";
 
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import auth from '@react-native-firebase/auth';
 import database from '@react-native-firebase/database';
-import { TextInput, Button, Title } from 'react-native-paper';
+import { Modal, Portal, TextInput, Button, Title, ActivityIndicator, Colors } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Appbar, FAB, Switch, Avatar } from 'react-native-paper';
 import { formatNumber } from 'react-native-currency-input';
 import moment from 'moment';
+
+LogBox.ignoreAllLogs();
 
 //Test
 function LoginScreen(props) {
@@ -142,19 +148,24 @@ function CustomNavigationBar(props) {
   );
 }
 
-const Item = ({ name, backgroundColor, textColor, onPress }) => (
-  <TouchableOpacity onPress={onPress} style={[styles.item, styles.elevation, backgroundColor]}>
+const Item = ({ name, backgroundColor, textColor, onPress, disabled = false }) => (
+  <TouchableOpacity onPress={onPress} disabled={disabled} style={[styles.item, styles.elevation, backgroundColor]}>
     <Text style={[styles.titleItem, textColor]}>{name}</Text>
   </TouchableOpacity>
 );
 
-// const ItemSection = ({ name, backgroundColor, textColor, onPress }) => (
-//   <TouchableOpacity onPress={onPress} style={[styles.item, styles.elevation, backgroundColor]}>
-//     <Text style={[styles.titleItem, textColor]}>{name}</Text>
-//   </TouchableOpacity>
-// );
+const ItemSection = ({ name, quantity, subTotal, onPress }) => (
+  <TouchableOpacity onPress={onPress} style={[styles.itemSection]}>
+    <Text style={[styles.titleItemSection]}>{name}</Text>
+    <View style={styles.switchContainerOrder}>
+      <View style={styles.switchBoxOrder}><Text style={styles.titleItemSection}>{quantity}</Text></View>
+      <View style={styles.switchBoxTotal}><Text style={styles.titleItemSection}>{subTotal}</Text></View>
+    </View>
+  </TouchableOpacity>
+);
 function HomeScreen(props) {
   const [isClicked, setIsClicked] = useState(false);
+  const [printers, setPrinters] = useState();
 
   useEffect(() => {
     if (props.route.params?.isClicked) {
@@ -163,7 +174,17 @@ function HomeScreen(props) {
         isClicked: !props.route.params?.isClicked
       })
     }
-  }, [props.route.params?.isClicked])
+    let init = null;
+    if (printers == null) {
+      init = BLEPrinter.init().then(() => {
+        BLEPrinter.getDeviceList().then(setPrinters);
+      });
+    }
+
+    return () => {
+      init
+    }
+  }, [props.route.params?.isClicked, printers])
 
   function handleNewOrder() {
     setIsClicked(true);
@@ -172,19 +193,22 @@ function HomeScreen(props) {
       const month = moment().month();
       const year = moment().year();
       const newReference = database().ref('/orders/' + year + '/' + month).push();
+      const today = moment().format('YYYY-MM-DD HH:mm:ss');
 
       newReference
-        .set({ created: moment().format('YYYY-MM-DD HH:mm:ss') })
+        .set({ created: today })
         .then(() => {
           props.navigation.navigate("Tambah Pesanan", {
             orderId: newReference.key,
             year: year,
             month: month,
+            today: today,
+            printer: printers != null && printers.length != 0 ? printers[0] : null
           })
         })
         .catch(error => {
           console.error(error);
-        });
+        })
     }
   }
 
@@ -205,7 +229,7 @@ function HomeScreen(props) {
 }
 
 function TambahPesananScreen(props) {
-  const { orderId, month, year } = props.route.params
+  const { orderId, month, year, today, printer } = props.route.params
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -256,8 +280,8 @@ function TambahPesananScreen(props) {
             <MaterialCommunityIcons name="cart" color={color} size={26} />
           ),
         }}>
-        {(props) => <TambahKeranjangScreen {...props} orderId={orderId} month={month} year={year} />}
-        </Tab.Screen>
+        {(props) => <TambahKeranjangScreen {...props} orderId={orderId} month={month} year={year} today={today} printer={printer} />}
+      </Tab.Screen>
     </Tab.Navigator>
   );
 }
@@ -271,7 +295,7 @@ function TambahMenuScreen(props) {
     const backgroundColor = item.available ? "#f9c2ff" : "#6e3b6e";
     const color = item.available ? "black" : "white";
     return (
-      <Item name={item.name} backgroundColor={{ backgroundColor }} textColor={{ color }} onPress={() => props.navigation.navigate("Tambah Produk", {
+      <Item name={item.name} backgroundColor={{ backgroundColor }} textColor={{ color }} disabled={!item.available} onPress={() => props.navigation.navigate("Tambah Produk", {
         orderId: orderId,
         month: month,
         year: year,
@@ -329,7 +353,7 @@ function TambahMenuScreen(props) {
   }, []);
 
   return (
-    <SafeAreaView style={styles.containerHome}>
+    <SafeAreaView style={styles.container}>
       {foods != null && drinks != null &&
         <SectionList
           sections={[foods, drinks]}
@@ -345,10 +369,78 @@ function TambahMenuScreen(props) {
 }
 
 function TambahKeranjangScreen(props) {
-  const { orderId, month, year } = props;
+  const { orderId, month, year, today, printer } = props;
   const [list, setList] = useState();
   const [total, setTotal] = useState();
   const [totalFormatted, setTotalFormatted] = useState();
+  const [paid, setPaid] = useState();
+  const [ret, setRet] = useState(0);
+  const [visible, setVisible] = React.useState(false);
+
+  const showModal = () => setVisible(true);
+  const hideModal = () => setVisible(false);
+  const containerStyle = { padding: 20 };
+
+  const handlePrint = () => {
+    let datas = "<CM>CHIC\'N RICE BOX</CM>\nDate: " + today + "\n--------------------------------\n";
+    list.forEach(element => {
+      const formattedPrice = formatNumber(element.price, {
+        separator: ',',
+        prefix: 'Rp ',
+        precision: 0,
+        delimiter: '.',
+        signPosition: 'beforePrefix',
+      })
+      const formattedSubtotal = formatNumber(element.subTotal, {
+        separator: ',',
+        prefix: 'Rp ',
+        precision: 0,
+        delimiter: '.',
+        signPosition: 'beforePrefix',
+      })
+      datas += element.name + '\n';
+      datas += '<R>' + element.quantity + '@' + formattedPrice + ' = ' + formattedSubtotal + '</R>\n';
+    });
+    datas += "--------------------------------\n";
+    datas += 'TOTAL:   ' + totalFormatted;
+    BLEPrinter.connectPrinter(printer.inner_mac_address).then(
+      (currentPrinter) => currentPrinter && BLEPrinter.printText(datas),
+      error => console.warn(error))
+  }
+
+  const handleHapus = useCallback(async (id) => {
+    Alert.alert("Tunggu dulu!", "Kamu yakin mau hapus?", [
+      {
+        text: "Batal",
+        onPress: () => null,
+        style: "cancel"
+      },
+      {
+        text: "Hapus", onPress: async () => {
+          showModal();
+          await database().ref('/orders/' + year + '/' + month + '/' + orderId + '/products/' + id).remove().then(() => hideModal());
+        }
+      }
+    ]);
+  })
+
+  const renderItem = ({ item }) => {
+    return (
+      <ItemSection name={item.name} quantity={item.quantity + " X " + formatNumber(item.price, {
+        separator: ',',
+        prefix: 'Rp ',
+        precision: 0,
+        delimiter: '.',
+        signPosition: 'beforePrefix',
+      })} subTotal={formatNumber(item.subTotal, {
+        separator: ',',
+        prefix: 'Rp ',
+        precision: 0,
+        delimiter: '.',
+        signPosition: 'beforePrefix',
+      })} onPress={() => handleHapus(item.id)} />
+    )
+  };
 
   useEffect(() => {
     const onValueChange = database()
@@ -377,18 +469,100 @@ function TambahKeranjangScreen(props) {
           delimiter: '.',
           signPosition: 'beforePrefix',
         })
-        console.log(datas)
         setList(datas)
         setTotal(total)
         setTotalFormatted(totalFormatted)
       });
 
-      return () => database().ref('/orders/' + year + '/' + month + '/' + orderId + '/products').off('value', onValueChange);
+    return () => { database().ref('/orders/' + year + '/' + month + '/' + orderId + '/products').off('value', onValueChange) };
   }, []);
+  function onSaveOrder() {
+    const reference = database().ref('/orders/' + year + '/' + month + '/' + orderId + '/total');
 
+    // Execute transaction
+    return reference.transaction(currentTotal => {
+      if (currentTotal === null) return total;
+      return currentTotal + total;
+    });
+  }
+  function onSaveMonth() {
+    const reference = database().ref('/orders/' + year + '/' + month + '/total');
+
+    // Execute transaction
+    return reference.transaction(currentTotal => {
+      if (currentTotal === null) return total;
+      return currentTotal + total;
+    });
+  }
+  function onSaveYear() {
+    const reference = database().ref('/orders/' + year + '/total');
+
+    // Execute transaction
+    return reference.transaction(currentTotal => {
+      if (currentTotal === null) return total;
+      return currentTotal + total;
+    });
+  }
+  function onSaveAll() {
+    const reference = database().ref('/orders/total');
+
+    // Execute transaction
+    return reference.transaction(currentTotal => {
+      if (currentTotal === null) return total;
+      return currentTotal + total;
+    });
+  }
+  function handleSimpan() {
+    showModal();
+    onSaveOrder().then(transaction => onSaveMonth().then(transaction => onSaveYear().then(transaction => onSaveAll().then(transaction => {
+      props.navigation.navigate("Home", { isClicked: true });
+      hideModal();
+    }))));
+  }
   return (
-    <SafeAreaView style={styles.containerHome}>
-      <Text>{totalFormatted}</Text>
+    <SafeAreaView style={styles.container}>
+      <Portal>
+        <Modal visible={visible} contentContainerStyle={containerStyle}>
+          <ActivityIndicator animating={true} color={Colors.red800} size="large" />
+        </Modal>
+      </Portal>
+      <View style={styles.switchContainerOrder}>
+        <View style={styles.switchBoxOrder}><Text style={{ fontSize: 24, fontWeight: "bold", }}>Total:</Text></View>
+        <View style={styles.switchBoxTotal}><Text style={{ fontSize: 24, fontWeight: "bold" }}>{totalFormatted}</Text></View>
+      </View>
+      <TextInput
+        label="Bayar"
+        value={paid}
+        onChangeText={text => {
+          setPaid(text)
+          const number = Number(text);
+          if (number >= total) { setRet(number - total) } else { setRet(0) }
+        }}
+        keyboardType="numeric"
+      />
+      <View style={styles.switchContainerOrder}>
+        <View style={styles.switchBoxOrder}><Text style={{ fontSize: 24, fontWeight: "bold", }}>Kembali:</Text></View>
+        <View style={styles.switchBoxTotal}><Text style={{ fontSize: 24, fontWeight: "bold" }}>{formatNumber(ret, {
+          separator: ',',
+          prefix: 'Rp ',
+          precision: 0,
+          delimiter: '.',
+          signPosition: 'beforePrefix',
+        })}</Text></View>
+      </View>
+      <View style={styles.switchContainerOrder}>
+        <Button style={styles.input} mode="contained" disabled={(paid == null || paid < total) || total == 0} onPress={handleSimpan}>
+          Simpan
+        </Button>
+        <Button style={styles.input} mode="contained" disabled={(paid == null || paid < total) || total == 0} onPress={handlePrint}>
+          Cetak
+        </Button>
+      </View>
+      <FlatList
+        data={list}
+        renderItem={renderItem}
+        keyExtractor={item => item.id}
+      />
     </SafeAreaView>
   );
 }
@@ -403,17 +577,17 @@ function TambahProdukScreen(props) {
   async function handleTambah() {
     if (name != null && price != null && quantity != 0) {
       database().ref('/orders/' + year + '/' + month + '/' + orderId + '/products/' + id).set({
-          name: name,
-          price: price,
-          quantity: quantity,
-          subTotal: price * quantity
-        })
+        name: name,
+        price: price,
+        quantity: quantity,
+        subTotal: price * quantity
+      })
         .then(() => props.navigation.goBack())
         .catch(error => {
           console.error(error);
         });
     } else if (quantity == 0) {
-        await database().ref('/orders/' + year + '/' + month + '/' + orderId + '/products/' + id).set(null)
+      await database().ref('/orders/' + year + '/' + month + '/' + orderId + '/products/' + id).set(null)
         .then(() => props.navigation.goBack())
         .catch(error => {
           console.error(error);
@@ -464,12 +638,12 @@ function TambahProdukScreen(props) {
       <Text style={styles.productTitle}>{name}</Text>
       <Text style={styles.productTitle}>{priceFromatted}</Text>
       <View style={styles.switchContainerPlus}>
-        <TouchableOpacity onPress={() => {if(quantity != 0 ) setQuantity(quantity-1)}}>
+        <TouchableOpacity onPress={() => { if (quantity != 0) setQuantity(quantity - 1) }}>
           <Avatar.Icon size={64} icon="minus" />
         </TouchableOpacity>
         <View style={styles.switchBoxPlus}><Text style={{ fontSize: 40, fontWeight: "bold", }}>{quantity}</Text></View>
-        <TouchableOpacity onPress={() => {if(quantity != 99) setQuantity(quantity+1)}}>
-          <Avatar.Icon size={64} icon="plus"/>
+        <TouchableOpacity onPress={() => { if (quantity != 99) setQuantity(quantity + 1) }}>
+          <Avatar.Icon size={64} icon="plus" />
         </TouchableOpacity>
       </View>
       <Button style={styles.input} mode="contained" onPress={handleTambah}>
@@ -966,7 +1140,7 @@ const App = () => {
                 } else if (role == "Pegawai") {
                   return <HomeScreen {...props} role={role} />
                 } else {
-                  return null;
+                  return <SafeAreaView style={styles.containerHome}><ActivityIndicator animating={true} color={Colors.red800} size="large" /></SafeAreaView>;
                 }
               }}
             </Stack.Screen>
@@ -1085,6 +1259,13 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     marginHorizontal: 8
   },
+  itemSection: {
+    padding: 16,
+    marginVertical: 4,
+    marginHorizontal: 4,
+    borderBottomWidth: 1,
+    borderStyle: "dotted"
+  },
   shadowProp: {
     shadowColor: '#171717',
     shadowOffset: { width: -2, height: 4 },
@@ -1097,6 +1278,9 @@ const styles = StyleSheet.create({
   },
   titleItem: {
     fontSize: 28,
+  },
+  titleItemSection: {
+    fontSize: 16,
   },
   switchContainer: {
     flexDirection: "row",
@@ -1112,10 +1296,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  switchContainerOrder: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    height: "auto",
+    alignItems: "center",
+    justifyContent: "space-around",
+  },
   switchBox: {
     flex: 1,
     margin: 2,
     height: 32,
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "nowrap",
+  },
+  switchBoxOrder: {
+    flex: 1,
+    height: 32,
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "nowrap",
+  },
+  switchBoxTotal: {
+    flex: 1,
+    height: 32,
+    justifyContent: "flex-end",
     alignItems: "center",
     flexDirection: "row",
     flexWrap: "nowrap",
