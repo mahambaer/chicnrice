@@ -18,7 +18,7 @@ import {
   BackHandler,
   Alert,
   SectionList,
-  LogBox 
+  LogBox
 } from 'react-native';
 
 import {
@@ -32,7 +32,7 @@ import auth from '@react-native-firebase/auth';
 import database from '@react-native-firebase/database';
 import { Modal, Portal, TextInput, Button, Title, ActivityIndicator, Colors } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { Appbar, FAB, Switch, Avatar } from 'react-native-paper';
+import { Appbar, FAB, Switch, Avatar, List } from 'react-native-paper';
 import { formatNumber } from 'react-native-currency-input';
 import moment from 'moment';
 
@@ -375,7 +375,7 @@ function TambahKeranjangScreen(props) {
   const [totalFormatted, setTotalFormatted] = useState();
   const [paid, setPaid] = useState();
   const [ret, setRet] = useState(0);
-  const [visible, setVisible] = React.useState(false);
+  const [visible, setVisible] = useState(false);
 
   const showModal = () => setVisible(true);
   const hideModal = () => setVisible(false);
@@ -1081,9 +1081,180 @@ function MinumanEditScreen(props) {
 }
 
 function PenjualanScreen(props) {
+  const [totalAll, setTotalAll] = useState();
+  const [totalYear, setTotalYear] = useState();
+  const [totalMonth, setTotalMonth] = useState();
+  const [year, setYear] = useState(moment().year());
+  const [month, setMonth] = useState(moment().month());
+  const [yearView, setYearView] = useState(moment().year());
+  const [monthView, setMonthView] = useState(moment().month());
+  const [isClicked, setIsClicked] = useState(true);
+  const [yearsPick, setYearsPick] = useState();
+  const [monthsPick, setMonthsPick] = useState();
+  const [isYearClicked, setIsYearClicked] = useState(false);
+  const [isMonthClicked, setIsMonthClicked] = useState(false);
+  const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+  const containerStyle = { backgroundColor: "white", padding: 8, margin: 16 };
+
+  const showModalYear = () => setIsYearClicked(true);
+  const showModalMonth = () => setIsMonthClicked(true);
+  const hideModal = () => {
+    setIsMonthClicked(false);
+    setIsYearClicked(false);
+  };
+
+  useEffect(() => {
+
+    setYear(year);
+    setMonth(month);
+
+    let subscribe = database()
+      .ref('/orders')
+      .on('value', snapshot => {
+        const formatted = formatNumber(snapshot.val().total, {
+          separator: ',',
+          prefix: 'Rp ',
+          precision: 0,
+          delimiter: '.',
+          signPosition: 'beforePrefix',
+        })
+        const datas = snapshot.val();
+        const { total, ...rest } = datas;
+
+        let years = [];
+
+        for (const [key, item] of Object.entries(rest)) {
+          years = [...years, key]
+        }
+        setYearsPick(years)
+        setTotalAll(formatted);
+      });
+
+    if (year != null) {
+      subscribe = database()
+        .ref('/orders/' + year)
+        .on('value', snapshot => {
+          const formatted = formatNumber(snapshot.val().total, {
+            separator: ',',
+            prefix: 'Rp ',
+            precision: 0,
+            delimiter: '.',
+            signPosition: 'beforePrefix',
+          })
+          const datas = snapshot.val();
+          const { total, ...rest } = datas;
+
+          let months = [];
+
+          for (const [key, item] of Object.entries(rest)) {
+            months = [...months, key]
+          }
+          setMonthsPick(months);
+          if (isClicked) setTotalYear(formatted);
+        });
+    }
+
+    if (month != null) {
+      subscribe = database()
+        .ref('/orders/' + year + '/' + month)
+        .on('value', snapshot => {
+          if (snapshot.val() != null) {
+            const formatted = formatNumber(snapshot.val().total, {
+              separator: ',',
+              prefix: 'Rp ',
+              precision: 0,
+              delimiter: '.',
+              signPosition: 'beforePrefix',
+            })
+            if (isClicked) setTotalMonth(formatted);
+          }
+        });
+    }
+
+    setIsClicked(false);
+    return () => {
+      subscribe;
+    };
+  }, [month, year]);
+
+  function handleClickPicker(value) {
+    if (isYearClicked) setYear(value);
+    if (isMonthClicked) setMonth(value);
+    hideModal();
+  }
+
+  function handleCariClick() {
+    if (year != null) {
+      database()
+        .ref('/orders/' + year)
+        .on('value', snapshot => {
+          const formatted = formatNumber(snapshot.val().total, {
+            separator: ',',
+            prefix: 'Rp ',
+            precision: 0,
+            delimiter: '.',
+            signPosition: 'beforePrefix',
+          })
+          setTotalYear(formatted);
+          setYearView(year);
+        });
+    }
+
+    if (month != null) {
+      database()
+        .ref('/orders/' + year + '/' + month)
+        .on('value', snapshot => {
+          if (snapshot.val() != null) {
+            const formatted = formatNumber(snapshot.val().total, {
+              separator: ',',
+              prefix: 'Rp ',
+              precision: 0,
+              delimiter: '.',
+              signPosition: 'beforePrefix',
+            }) 
+            setTotalMonth(formatted);
+            setMonthView(month);
+          }
+        });
+    }
+  }
+
+  function renderItem(text) {
+    return (
+      <TouchableOpacity onPress={() => handleClickPicker(text) }>
+        {isYearClicked &&
+          <List.Item key={text} title={text} style={year == text ? {backgroundColor: 'gray'} : {backgroundColor: 'white'}} titleStyle={year == text ? {color: 'white'} : {color: 'black'}}/>
+        }
+        {isMonthClicked &&
+          <List.Item key={text} title={months[text]} style={month == text ? {backgroundColor: 'gray'} : {backgroundColor: 'white'}} titleStyle={month == text ? {color: 'white'} : {color: 'black'}}/>
+        }
+      </TouchableOpacity>
+    )
+  }
+
   return (
-    <SafeAreaView style={styles.containerHome}>
-      <Text>Penjualan Screen</Text>
+    <SafeAreaView style={styles.container}>
+      <Portal>
+        <Modal visible={isYearClicked || isMonthClicked} onDismiss={hideModal} contentContainerStyle={containerStyle}>
+          <List.Section>
+            {isYearClicked && yearsPick.map((item) => renderItem(item))}
+            {isMonthClicked && monthsPick.map((item) => renderItem(item))}
+          </List.Section>
+        </Modal>
+      </Portal>
+      <Button mode="outlined" style={{ marginVertical: 8 }} onPress={showModalYear}>
+        {year}
+      </Button>
+      <Button mode="outlined" style={{ marginVertical: 8 }} onPress={showModalMonth}>
+        {months[month]}
+      </Button>
+      <Button mode="contained" style={{ marginVertical: 8 }} onPress={handleCariClick}>
+        Cari
+      </Button>
+      <Text style={{ fontWeight: "bold", fontSize: 16 }}>Total Penjualan: {totalAll}</Text>
+      <Text style={{ fontWeight: "bold", fontSize: 16 }}>Total Tahun {yearView}: {totalYear}</Text>
+      <Text style={{ fontWeight: "bold", fontSize: 16 }}>Total Tahun {months[monthView]}: {totalMonth}</Text>
     </SafeAreaView>
   );
 }
